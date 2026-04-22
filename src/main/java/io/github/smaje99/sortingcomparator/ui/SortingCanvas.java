@@ -16,7 +16,7 @@ import java.awt.geom.RoundRectangle2D;
 import java.util.Arrays;
 
 public final class SortingCanvas extends JComponent {
-    private SortSnapshot snapshot;
+    private transient SortSnapshot snapshot;
 
     public SortingCanvas(SortSnapshot initialSnapshot) {
         this.snapshot = initialSnapshot;

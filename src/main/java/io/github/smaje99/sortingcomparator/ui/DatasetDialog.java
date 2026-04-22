@@ -1,6 +1,9 @@
 package io.github.smaje99.sortingcomparator.ui;
 
-import io.github.smaje99.sortingcomparator.model.DatasetFactory;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.awt.Window;
+import java.util.Arrays;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -10,10 +13,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
-import java.awt.BorderLayout;
-import java.awt.FlowLayout;
-import java.awt.Window;
-import java.util.Arrays;
+
+import io.github.smaje99.sortingcomparator.model.DatasetFactory;
 
 public final class DatasetDialog extends JDialog {
     private final JTextArea valuesArea = new JTextArea(8, 52);
@@ -79,7 +80,7 @@ public final class DatasetDialog extends JDialog {
             dataset = parsed;
             accepted = true;
             dispose();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             JOptionPane.showMessageDialog(
                     this,
                     "Dataset must contain 5 to 100 unique positive integers.",

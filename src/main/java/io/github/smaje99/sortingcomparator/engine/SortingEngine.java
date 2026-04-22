@@ -1,5 +1,16 @@
 package io.github.smaje99.sortingcomparator.engine;
 
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.IntSupplier;
+
 import io.github.smaje99.sortingcomparator.algorithm.InstrumentedArray;
 import io.github.smaje99.sortingcomparator.algorithm.SortAlgorithm;
 import io.github.smaje99.sortingcomparator.algorithm.SortContext;
@@ -10,14 +21,6 @@ import io.github.smaje99.sortingcomparator.model.SortHighlight;
 import io.github.smaje99.sortingcomparator.model.SortMetrics;
 import io.github.smaje99.sortingcomparator.model.SortSnapshot;
 import io.github.smaje99.sortingcomparator.model.SortStatus;
-
-import java.util.Arrays;
-import java.util.Objects;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.function.Consumer;
-import java.util.function.IntSupplier;
 
 /**
  * Owns one reusable sorting execution lane with pause, resume, cancel, and reset semantics.
@@ -32,10 +35,10 @@ public final class SortingEngine implements AutoCloseable {
     private volatile boolean pauseRequested;
     private volatile boolean cancelRequested;
     private volatile SortStatus status = SortStatus.IDLE;
-    private volatile Future<?> runningTask;
-    private volatile int[] originalValues;
-    private volatile SortSnapshot lastSnapshot;
-    private volatile long generation;
+    private final AtomicReference<Future<?>> runningTask = new AtomicReference<>();
+    private AtomicIntegerArray originalValues;
+    private final AtomicReference<SortSnapshot> lastSnapshot = new AtomicReference<>();
+    private final AtomicLong generation = new AtomicLong();
 
     public SortingEngine(
             AlgorithmType type,
@@ -46,7 +49,7 @@ public final class SortingEngine implements AutoCloseable {
     ) {
         this.type = Objects.requireNonNull(type);
         DatasetFactory.validateDataset(initialValues);
-        this.originalValues = Arrays.copyOf(initialValues, initialValues.length);
+        this.originalValues = new AtomicIntegerArray(Arrays.copyOf(initialValues, initialValues.length));
         this.listener = Objects.requireNonNull(listener);
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.delaySupplier = Objects.requireNonNull(delaySupplier);
@@ -55,7 +58,7 @@ public final class SortingEngine implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
-        publish(new SortSnapshot(originalValues, SortHighlight.none(), SortMetrics.zero(), SortStatus.IDLE));
+        publish(new SortSnapshot(originalValuesSnapshot(), SortHighlight.none(), SortMetrics.zero(), SortStatus.IDLE));
     }
 
     public AlgorithmType type() {
@@ -77,10 +80,10 @@ public final class SortingEngine implements AutoCloseable {
         cancelRequested = false;
         pauseRequested = false;
         status = SortStatus.RUNNING;
-        long runGeneration = ++generation;
-        int[] runValues = Arrays.copyOf(originalValues, originalValues.length);
+        long runGeneration = generation.incrementAndGet();
+        int[] runValues = originalValuesSnapshot();
         SortAlgorithm algorithm = type.createAlgorithm();
-        runningTask = executor.submit(() -> execute(algorithm, runValues, runGeneration));
+        runningTask.set(executor.submit(() -> execute(algorithm, runValues, runGeneration)));
         return true;
     }
 
@@ -108,8 +111,8 @@ public final class SortingEngine implements AutoCloseable {
     public void cancel() {
         cancelRequested = true;
         pauseRequested = false;
-        generation++;
-        Future<?> task = runningTask;
+        generation.incrementAndGet();
+        Future<?> task = runningTask.get();
         if (task != null) {
             task.cancel(true);
         }
@@ -120,24 +123,24 @@ public final class SortingEngine implements AutoCloseable {
         publishStatus(SortStatus.CANCELLED);
     }
 
-    public void reset() {
+    public synchronized void reset() {
         if (status == SortStatus.RUNNING || status == SortStatus.PAUSED) {
             cancel();
         }
-        generation++;
+        generation.incrementAndGet();
         status = SortStatus.IDLE;
-        publish(new SortSnapshot(originalValues, SortHighlight.none(), SortMetrics.zero(), SortStatus.IDLE));
+        publish(new SortSnapshot(originalValuesSnapshot(), SortHighlight.none(), SortMetrics.zero(), SortStatus.IDLE));
     }
 
-    public void setDataset(int[] values) {
+    public synchronized void setDataset(int[] values) {
         DatasetFactory.validateDataset(values);
         if (status == SortStatus.RUNNING || status == SortStatus.PAUSED) {
             cancel();
         }
-        generation++;
-        originalValues = Arrays.copyOf(values, values.length);
+        generation.incrementAndGet();
+        originalValues = new AtomicIntegerArray(Arrays.copyOf(values, values.length));
         status = SortStatus.IDLE;
-        publish(new SortSnapshot(originalValues, SortHighlight.none(), SortMetrics.zero(), SortStatus.IDLE));
+        publish(new SortSnapshot(originalValuesSnapshot(), SortHighlight.none(), SortMetrics.zero(), SortStatus.IDLE));
     }
 
     private void execute(SortAlgorithm algorithm, int[] runValues, long runGeneration) {
@@ -151,7 +154,7 @@ public final class SortingEngine implements AutoCloseable {
         publishFromRun(runGeneration, new SortSnapshot(array.snapshot(), SortHighlight.none(), context.metrics(), SortStatus.RUNNING));
         try {
             algorithm.sort(array, context);
-            if (runGeneration != generation) {
+            if (isStale(runGeneration)) {
                 return;
             }
             if (cancelRequested) {
@@ -161,13 +164,13 @@ public final class SortingEngine implements AutoCloseable {
             }
             status = SortStatus.COMPLETED;
             publishFromRun(runGeneration, new SortSnapshot(array.snapshot(), SortHighlight.none(), context.metrics(), SortStatus.COMPLETED));
-        } catch (SortInterruptedException e) {
-            if (runGeneration == generation) {
+        } catch (SortInterruptedException _) {
+            if (isCurrent(runGeneration)) {
                 status = SortStatus.CANCELLED;
                 publishFromRun(runGeneration, new SortSnapshot(array.snapshot(), SortHighlight.none(), context.metrics(), SortStatus.CANCELLED));
             }
         } catch (RuntimeException e) {
-            if (runGeneration == generation) {
+            if (isCurrent(runGeneration)) {
                 status = SortStatus.FAILED;
                 publishFromRun(runGeneration, new SortSnapshot(array.snapshot(), SortHighlight.none(), context.metrics(), SortStatus.FAILED));
             }
@@ -176,28 +179,28 @@ public final class SortingEngine implements AutoCloseable {
     }
 
     private void checkpoint(long runGeneration) {
-        if (cancelRequested || runGeneration != generation || Thread.currentThread().isInterrupted()) {
+        if (cancelRequested || isStale(runGeneration) || Thread.currentThread().isInterrupted()) {
             throw new SortInterruptedException();
         }
         synchronized (pauseMonitor) {
             while (pauseRequested && !cancelRequested) {
                 try {
                     pauseMonitor.wait();
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     throw new SortInterruptedException();
                 }
             }
         }
-        if (cancelRequested || runGeneration != generation || Thread.currentThread().isInterrupted()) {
+        if (cancelRequested || isStale(runGeneration) || Thread.currentThread().isInterrupted()) {
             throw new SortInterruptedException();
         }
     }
 
     private void publishStatus(SortStatus newStatus) {
-        SortSnapshot snapshot = lastSnapshot;
+        SortSnapshot snapshot = lastSnapshot.get();
         if (snapshot == null) {
-            snapshot = new SortSnapshot(originalValues, SortHighlight.none(), SortMetrics.zero(), newStatus);
+            snapshot = new SortSnapshot(originalValuesSnapshot(), SortHighlight.none(), SortMetrics.zero(), newStatus);
         } else {
             snapshot = new SortSnapshot(snapshot.values(), snapshot.highlight(), snapshot.metrics(), newStatus);
         }
@@ -205,14 +208,31 @@ public final class SortingEngine implements AutoCloseable {
     }
 
     private void publish(SortSnapshot snapshot) {
-        lastSnapshot = snapshot;
+        lastSnapshot.set(snapshot);
         dispatcher.accept(() -> listener.accept(snapshot));
     }
 
     private void publishFromRun(long runGeneration, SortSnapshot snapshot) {
-        if (runGeneration == generation) {
+        if (isCurrent(runGeneration)) {
             publish(snapshot);
         }
+    }
+
+    private synchronized int[] originalValuesSnapshot() {
+        AtomicIntegerArray values = originalValues;
+        int[] snapshot = new int[values.length()];
+        for (int i = 0; i < snapshot.length; i++) {
+            snapshot[i] = values.get(i);
+        }
+        return snapshot;
+    }
+
+    private boolean isCurrent(long runGeneration) {
+        return runGeneration == generation.get();
+    }
+
+    private boolean isStale(long runGeneration) {
+        return !isCurrent(runGeneration);
     }
 
     @Override

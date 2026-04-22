@@ -7,7 +7,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -17,22 +21,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SortingEngineTest {
     @Test
     void canPauseResumeAndCompleteRun() {
-        CopyOnWriteArrayList<SortSnapshot> snapshots = new CopyOnWriteArrayList<>();
+        SnapshotRecorder snapshots = new SnapshotRecorder();
         try (SortingEngine engine = new SortingEngine(
                 AlgorithmType.SIMPLE_BUBBLE,
                 shuffledThirty(),
-                snapshots::add,
+                snapshots,
                 Runnable::run,
                 () -> 1
         )) {
             engine.run();
-            waitForStatus(engine, SortStatus.RUNNING);
+            waitForStatus(snapshots, SortStatus.RUNNING);
             engine.pause();
             assertEquals(SortStatus.PAUSED, engine.status());
             engine.resume();
-            waitForStatus(engine, SortStatus.COMPLETED);
+            waitForStatus(snapshots, SortStatus.COMPLETED);
 
-            int[] sorted = snapshots.getLast().values();
+            int[] sorted = snapshots.last().values();
             int[] expected = shuffledThirty();
             Arrays.sort(expected);
             assertArrayEquals(expected, sorted);
@@ -41,40 +45,40 @@ class SortingEngineTest {
 
     @Test
     void canCancelAndReset() {
-        CopyOnWriteArrayList<SortSnapshot> snapshots = new CopyOnWriteArrayList<>();
+        SnapshotRecorder snapshots = new SnapshotRecorder();
         int[] original = shuffledHundred();
         try (SortingEngine engine = new SortingEngine(
                 AlgorithmType.SIMPLE_BUBBLE,
                 original,
-                snapshots::add,
+                snapshots,
                 Runnable::run,
                 () -> 2
         )) {
             engine.run();
-            waitForStatus(engine, SortStatus.RUNNING);
+            waitForStatus(snapshots, SortStatus.RUNNING);
             engine.cancel();
-            waitForStatus(engine, SortStatus.CANCELLED);
+            waitForStatus(snapshots, SortStatus.CANCELLED);
             engine.reset();
 
             assertEquals(SortStatus.IDLE, engine.status());
-            assertArrayEquals(original, snapshots.getLast().values());
+            assertArrayEquals(original, snapshots.last().values());
         }
     }
 
     @Test
     void canRunAgainAfterCompletion() {
-        CopyOnWriteArrayList<SortSnapshot> snapshots = new CopyOnWriteArrayList<>();
+        SnapshotRecorder snapshots = new SnapshotRecorder();
         try (SortingEngine engine = new SortingEngine(
                 AlgorithmType.QUICK_SORT,
                 new int[]{8, 7, 6, 5, 4, 3, 2, 1},
-                snapshots::add,
+                snapshots,
                 Runnable::run,
                 () -> 0
         )) {
             engine.run();
-            waitForStatus(engine, SortStatus.COMPLETED);
+            waitForStatus(snapshots, SortStatus.COMPLETED);
             assertDoesNotThrow(engine::run);
-            waitForStatus(engine, SortStatus.COMPLETED);
+            waitForStatus(snapshots, SortStatus.COMPLETED);
             assertTrue(snapshots.size() > 2);
         }
     }
@@ -95,11 +99,48 @@ class SortingEngineTest {
         return values;
     }
 
-    private void waitForStatus(SortingEngine engine, SortStatus status) {
-        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(8), () -> {
-            while (engine.status() != status) {
-                Thread.sleep(10);
+    private void waitForStatus(SnapshotRecorder snapshots, SortStatus status) {
+        try {
+            assertTrue(snapshots.awaitStatus(status, Duration.ofSeconds(8)), "Timed out waiting for " + status);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for " + status, e);
+        }
+    }
+
+    private static final class SnapshotRecorder implements Consumer<SortSnapshot> {
+        private final CopyOnWriteArrayList<SortSnapshot> snapshots = new CopyOnWriteArrayList<>();
+        private final BlockingQueue<SortStatus> statuses = new LinkedBlockingQueue<>();
+
+        @Override
+        public void accept(SortSnapshot snapshot) {
+            snapshots.add(snapshot);
+            statuses.add(snapshot.status());
+        }
+
+        private SortSnapshot last() {
+            return snapshots.getLast();
+        }
+
+        private int size() {
+            return snapshots.size();
+        }
+
+        private boolean awaitStatus(SortStatus expected, Duration timeout) throws InterruptedException {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (true) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    return false;
+                }
+                SortStatus observed = statuses.poll(remaining, TimeUnit.NANOSECONDS);
+                if (observed == expected) {
+                    return true;
+                }
+                if (observed == null) {
+                    return false;
+                }
             }
-        });
+        }
     }
 }

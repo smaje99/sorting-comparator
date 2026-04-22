@@ -1,10 +1,10 @@
 package io.github.smaje99.sortingcomparator;
 
-import io.github.smaje99.sortingcomparator.ui.MainFrame;
-import io.github.smaje99.sortingcomparator.ui.UiTheme;
-
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+
+import io.github.smaje99.sortingcomparator.ui.MainFrame;
+import io.github.smaje99.sortingcomparator.ui.UiTheme;
 
 public final class SortingComparatorApp {
     private SortingComparatorApp() {
@@ -14,7 +14,7 @@ public final class SortingComparatorApp {
         SwingUtilities.invokeLater(() -> {
             try {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException ignored) {
+            } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException _) {
                 // The default Swing look and feel is good enough when the system one is unavailable.
             }
             UiTheme.installDefaults();

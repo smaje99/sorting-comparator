@@ -10,6 +10,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -21,7 +22,7 @@ import java.util.function.IntSupplier;
 
 public final class AlgorithmPanel extends JPanel {
     private final AlgorithmType type;
-    private final SortingEngine engine;
+    private final transient SortingEngine engine;
     private final SortingCanvas canvas;
     private final JLabel statusLabel = new JLabel("Idle");
     private final JLabel comparisonsLabel = new JLabel("comparisons: 0");
@@ -84,7 +85,7 @@ public final class AlgorithmPanel extends JPanel {
         JLabel title = new JLabel(type.displayName());
         title.setFont(UiTheme.titleFont(title.getFont(), 17f));
         title.setForeground(new Color(255, 248, 236));
-        statusLabel.setHorizontalAlignment(JLabel.RIGHT);
+        statusLabel.setHorizontalAlignment(SwingConstants.RIGHT);
         statusLabel.setFont(statusLabel.getFont().deriveFont(Font.BOLD, 12f));
         statusLabel.setForeground(new Color(255, 234, 204));
 
