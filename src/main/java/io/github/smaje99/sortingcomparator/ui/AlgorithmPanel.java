@@ -24,7 +24,7 @@ import java.util.function.IntSupplier;
 public final class AlgorithmPanel extends JPanel {
     private final AlgorithmType type;
     private final transient SortingEngine engine;
-    private final Runnable snapshotListener;
+    private final transient Runnable snapshotListener;
     private final SortingCanvas canvas;
     private final JLabel statusLabel = new JLabel("Idle");
     private final JLabel comparisonsLabel = new JLabel("comparisons: 0");
@@ -34,7 +34,7 @@ public final class AlgorithmPanel extends JPanel {
     private final JButton runButton = new JButton("Run");
     private final JButton pauseButton = new JButton("Pause");
     private final JButton resetButton = new JButton("Reset");
-    private SortSnapshot lastSnapshot;
+    private transient SortSnapshot lastSnapshot;
 
     public AlgorithmPanel(AlgorithmType type, int[] dataset, IntSupplier delaySupplier, Runnable snapshotListener) {
         super(new BorderLayout(10, 8));
