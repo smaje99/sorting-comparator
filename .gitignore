@@ -1,4 +1,13 @@
-/SortingComparator.iml
+# IDE metadata
 /.idea/
+/*.iml
+
+# Build outputs
 /out/
+/target/
+
+# Legacy reference source outside the Maven runtime
 /src/def/*
+
+# Keep vendor/maven-repository tracked.
+# The Maven build resolves the vendored Constrains dependency from there.
