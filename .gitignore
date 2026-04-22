@@ -6,6 +6,12 @@
 /out/
 /target/
 
+# Libraries
+/.mvn/
+/.mvnw
+/.mvnw.cmd
+/lib/
+
 # Legacy reference source outside the Maven runtime
 /src/def/*
 
