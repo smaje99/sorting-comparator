@@ -4,11 +4,17 @@ import io.github.smaje99.sortingcomparator.model.AlgorithmType;
 import io.github.smaje99.sortingcomparator.model.DatasetFactory;
 import io.github.smaje99.sortingcomparator.model.SortStatus;
 import java.awt.BorderLayout;
+import java.awt.Cursor;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -28,6 +34,8 @@ import javax.swing.JViewport;
 import javax.swing.SpinnerNumberModel;
 
 public final class MainFrame extends JFrame {
+    private static final URI AUTHOR_PROFILE = URI.create("https://github.com/smaje99");
+
     private final List<AlgorithmPanel> panels = new ArrayList<>();
     private final JSlider speedSlider = new JSlider(0, 600, 120);
     private final JLabel speedValueLabel = new JLabel("120 ms");
@@ -87,7 +95,34 @@ public final class MainFrame extends JFrame {
         text.add(title);
         text.add(subtitle);
         row.add(text, BorderLayout.WEST);
+        row.add(authorLink(), BorderLayout.EAST);
         return row;
+    }
+
+    private JLabel authorLink() {
+        JLabel signature = new JLabel("<html><u>Hecho por Sergio Majé</u></html>");
+        signature.setFont(UiTheme.titleFont(signature.getFont(), 14f));
+        signature.setForeground(UiTheme.MUTED_TEXT);
+        signature.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        signature.setToolTipText(AUTHOR_PROFILE.toString());
+        signature.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                openAuthorProfile();
+            }
+        });
+        return signature;
+    }
+
+    private void openAuthorProfile() {
+        if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            return;
+        }
+        try {
+            Desktop.getDesktop().browse(AUTHOR_PROFILE);
+        } catch (IOException | SecurityException | UnsupportedOperationException _) {
+            // Ignore browse failures; the signature remains visible even when the OS blocks opening links.
+        }
     }
 
     private JPanel controlDeck() {
