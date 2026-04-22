@@ -18,11 +18,13 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.IntSupplier;
 
 public final class AlgorithmPanel extends JPanel {
     private final AlgorithmType type;
     private final transient SortingEngine engine;
+    private final Runnable snapshotListener;
     private final SortingCanvas canvas;
     private final JLabel statusLabel = new JLabel("Idle");
     private final JLabel comparisonsLabel = new JLabel("comparisons: 0");
@@ -32,16 +34,19 @@ public final class AlgorithmPanel extends JPanel {
     private final JButton runButton = new JButton("Run");
     private final JButton pauseButton = new JButton("Pause");
     private final JButton resetButton = new JButton("Reset");
+    private SortSnapshot lastSnapshot;
 
-    public AlgorithmPanel(AlgorithmType type, int[] dataset, IntSupplier delaySupplier) {
+    public AlgorithmPanel(AlgorithmType type, int[] dataset, IntSupplier delaySupplier, Runnable snapshotListener) {
         super(new BorderLayout(10, 8));
         this.type = type;
+        this.snapshotListener = Objects.requireNonNull(snapshotListener);
         SortSnapshot initialSnapshot = new SortSnapshot(
                 dataset,
                 io.github.smaje99.sortingcomparator.model.SortHighlight.none(),
                 SortMetrics.zero(),
                 SortStatus.IDLE
         );
+        this.lastSnapshot = initialSnapshot;
         this.canvas = new SortingCanvas(initialSnapshot);
         this.engine = new SortingEngine(type, dataset, this::applySnapshot, SwingUtilities::invokeLater, delaySupplier);
         build();
@@ -53,6 +58,10 @@ public final class AlgorithmPanel extends JPanel {
 
     public SortStatus status() {
         return engine.status();
+    }
+
+    public SortSnapshot snapshot() {
+        return lastSnapshot;
     }
 
     public void runSort() {
@@ -132,6 +141,7 @@ public final class AlgorithmPanel extends JPanel {
     }
 
     private void applySnapshot(SortSnapshot snapshot) {
+        lastSnapshot = snapshot;
         canvas.setSnapshot(snapshot);
         SortMetrics metrics = snapshot.metrics();
         comparisonsLabel.setText("comparisons: " + metrics.comparisons());
@@ -142,6 +152,7 @@ public final class AlgorithmPanel extends JPanel {
         runButton.setEnabled(snapshot.status() != SortStatus.RUNNING);
         pauseButton.setEnabled(snapshot.status() == SortStatus.RUNNING || snapshot.status() == SortStatus.PAUSED);
         pauseButton.setText(snapshot.status() == SortStatus.PAUSED ? "Resume" : "Pause");
+        snapshotListener.run();
     }
 
     private String label(SortStatus status) {

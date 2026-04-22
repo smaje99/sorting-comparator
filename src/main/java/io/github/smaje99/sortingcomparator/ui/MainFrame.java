@@ -2,6 +2,8 @@ package io.github.smaje99.sortingcomparator.ui;
 
 import io.github.smaje99.sortingcomparator.model.AlgorithmType;
 import io.github.smaje99.sortingcomparator.model.DatasetFactory;
+import io.github.smaje99.sortingcomparator.model.SortMetrics;
+import io.github.smaje99.sortingcomparator.model.SortSnapshot;
 import io.github.smaje99.sortingcomparator.model.SortStatus;
 import java.awt.BorderLayout;
 import java.awt.Cursor;
@@ -27,21 +29,27 @@ import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JOptionPane;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
+import javax.swing.JTable;
 import javax.swing.JViewport;
+import javax.swing.ListSelectionModel;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.table.DefaultTableModel;
 
 public final class MainFrame extends JFrame {
     private static final URI AUTHOR_PROFILE = URI.create("https://github.com/smaje99");
 
     private final List<AlgorithmPanel> panels = new ArrayList<>();
+    private final JButton statsButton = new JButton("Show stats");
     private final JSlider speedSlider = new JSlider(0, 600, 120);
     private final JLabel speedValueLabel = new JLabel("120 ms");
     private final JSpinner sizeSpinner = new JSpinner(new SpinnerNumberModel(20, DatasetFactory.MIN_SIZE, DatasetFactory.MAX_SIZE, 1));
     private final JComboBox<AlgorithmType> firstComparison = new JComboBox<>(AlgorithmType.values());
     private final JComboBox<AlgorithmType> secondComparison = new JComboBox<>(AlgorithmType.values());
+    private List<AlgorithmPanel> statsTargets = List.of();
     private int[] dataset = DatasetFactory.randomUniqueValues(20);
 
     public MainFrame() {
@@ -149,8 +157,10 @@ public final class MainFrame extends JFrame {
         UiTheme.styleButton(runAll);
         UiTheme.styleSecondaryButton(pauseAll);
         UiTheme.styleQuietButton(resetAll);
+        UiTheme.styleSecondaryButton(statsButton);
         UiTheme.styleButton(randomize);
         UiTheme.styleSecondaryButton(editDataset);
+        statsButton.setEnabled(false);
 
         UiTheme.styleSlider(speedSlider);
         speedSlider.setMajorTickSpacing(200);
@@ -160,22 +170,28 @@ public final class MainFrame extends JFrame {
         UiTheme.styleLabel(speedValueLabel);
         speedSlider.addChangeListener(event -> speedValueLabel.setText(speedSlider.getValue() + " ms"));
 
-        runAll.addActionListener(event -> panels.forEach(AlgorithmPanel::runSort));
+        runAll.addActionListener(event -> runTracked(panels));
         pauseAll.addActionListener(event -> panels.forEach(panel -> {
             if (panel.status() == SortStatus.RUNNING || panel.status() == SortStatus.PAUSED) {
                 panel.pauseOrResume();
             }
         }));
-        resetAll.addActionListener(event -> panels.forEach(AlgorithmPanel::resetSort));
+        resetAll.addActionListener(event -> {
+            clearStatsRun();
+            panels.forEach(AlgorithmPanel::resetSort);
+        });
         randomize.addActionListener(event -> {
+            clearStatsRun();
             dataset = DatasetFactory.randomUniqueValues((Integer) sizeSpinner.getValue());
             applyDatasetToPanels();
         });
         editDataset.addActionListener(event -> editDataset());
+        statsButton.addActionListener(event -> showStatsDialog());
 
         row.add(runAll);
         row.add(pauseAll);
         row.add(resetAll);
+        row.add(statsButton);
         row.add(separator());
         row.add(label("Size"));
         row.add(sizeSpinner);
@@ -209,7 +225,7 @@ public final class MainFrame extends JFrame {
         dashboard.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         dashboard.setBackground(UiTheme.APP_BACKGROUND);
         Arrays.stream(AlgorithmType.values()).forEach(type -> {
-            AlgorithmPanel panel = new AlgorithmPanel(type, dataset, speedSlider::getValue);
+            AlgorithmPanel panel = new AlgorithmPanel(type, dataset, speedSlider::getValue, this::refreshStatsButton);
             panels.add(panel);
             dashboard.add(panel);
         });
@@ -220,6 +236,7 @@ public final class MainFrame extends JFrame {
         DatasetDialog dialog = new DatasetDialog(this, dataset);
         dialog.setVisible(true);
         if (dialog.accepted()) {
+            clearStatsRun();
             dataset = dialog.dataset();
             sizeSpinner.setValue(dataset.length);
             applyDatasetToPanels();
@@ -237,9 +254,76 @@ public final class MainFrame extends JFrame {
             return;
         }
         panels.forEach(AlgorithmPanel::resetSort);
-        panels.stream()
+        List<AlgorithmPanel> selectedPanels = panels.stream()
                 .filter(panel -> panel.type() == first || panel.type() == second)
-                .forEach(AlgorithmPanel::runSort);
+                .toList();
+        runTracked(selectedPanels);
+    }
+
+    private void runTracked(List<AlgorithmPanel> targets) {
+        statsTargets = List.copyOf(targets);
+        statsButton.setEnabled(false);
+        statsTargets.forEach(AlgorithmPanel::runSort);
+        refreshStatsButton();
+    }
+
+    private void clearStatsRun() {
+        statsTargets = List.of();
+        statsButton.setEnabled(false);
+    }
+
+    private void refreshStatsButton() {
+        statsButton.setEnabled(!statsTargets.isEmpty()
+                && statsTargets.stream().allMatch(panel -> panel.status() == SortStatus.COMPLETED));
+    }
+
+    private void showStatsDialog() {
+        if (!statsButton.isEnabled()) {
+            return;
+        }
+
+        String[] columns = {"Algorithm", "Status", "Comparisons", "Swaps", "Writes", "Time (ms)"};
+        Object[][] rows = statsTargets.stream()
+                .map(this::statsRow)
+                .toArray(Object[][]::new);
+        DefaultTableModel model = new DefaultTableModel(rows, columns) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        JTable table = new JTable(model);
+        table.setAutoCreateRowSorter(true);
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        table.setFillsViewportHeight(true);
+
+        JScrollPane scrollPane = new JScrollPane(table);
+        scrollPane.setPreferredSize(new Dimension(720, Math.min(320, 64 + rows.length * 24)));
+        JOptionPane.showMessageDialog(this, scrollPane, "Sorting stats", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private Object[] statsRow(AlgorithmPanel panel) {
+        SortSnapshot snapshot = panel.snapshot();
+        SortMetrics metrics = snapshot.metrics();
+        return new Object[]{
+                panel.type().displayName(),
+                label(snapshot.status()),
+                metrics.comparisons(),
+                metrics.swaps(),
+                metrics.writes(),
+                metrics.elapsedMillis()
+        };
+    }
+
+    private String label(SortStatus status) {
+        return switch (status) {
+            case IDLE -> "Idle";
+            case RUNNING -> "Running";
+            case PAUSED -> "Paused";
+            case COMPLETED -> "Completed";
+            case CANCELLED -> "Cancelled";
+            case FAILED -> "Failed";
+        };
     }
 
     private JLabel label(String text) {
